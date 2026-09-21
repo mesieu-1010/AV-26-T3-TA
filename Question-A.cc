@@ -47,14 +47,99 @@ struct Row {
     double y_measured;   // deg
 };
 
+std::int16_t readSigned16LittleEdian(
+    const std::array<std::uint8_t, 8> &data,
+    int startByte
+) {
+    // We first extract the first byte at start byte and place on the 8 rightmost positions
+    // We shift to the left 8 position, extracting the next byte and use OR operator.
+    const std::uint16_t raw = 
+        static_cast<std::uint16_t>(data[startByte]) |
+        static_cast<std::uint16_t>(data[startByte + 1] << 8);
+
+    return static_cast<std::int16_t> (raw);
+}
+
 // Read the candump log at `path` and return one Row per STEER_ActuatorLog frame, in order.
 // Push one Row{t, u_commanded, y_measured} per kept frame.
 std::vector<Row> decodeLog(const std::string& path) {
+    // Since 512 in decimal is 0x200 in hexadecimal
+    constexpr unsigned STEER_ACTUATOR_LOG_ID = 0x200;
+
     std::vector<Row> rows;
+    std::ifstream file(path);
 
-    // TODO: your code here
-    (void)path;  // remove once you open the file
+    // Cannot read file or file does not exist
+    if (!file) {
+        return rows;
+    }
 
+    bool haveFirstKeptFrame = false;
+    double firstKeptTimestamp = 0.0;
+
+    std::string line;
+    while(std::getline(file, line)) {
+        double timestamp;
+        char interfaceName[20];
+        char frameToken[100];
+
+        //E.g: Extract (1705638751.000000) vcan0 200#00001400852FB01D
+        if (std::sscanf(line.c_str(), "(%lf) %19s %99s", &timestamp,
+            interfaceName, frameToken) != 3) {
+            continue;
+        }
+
+        const std::string frame(frameToken);
+        const std::size_t hashPosition = frame.find('#');
+
+        if (hashPosition == std::string::npos) {
+            continue;
+        }
+
+        // Extract the canId into hexadecimal number
+        const unsigned canId = std::stoul(frame.substr(0, hashPosition), 
+            nullptr, 16);
+        
+        // Keep only STEER_ActuatorLog frames
+        if (canId != STEER_ACTUATOR_LOG_ID) {
+            continue;
+        }
+
+        // Extract the hexa metadata
+        const std::string hexData = frame.substr(hashPosition + 1);
+
+        // 8 data bytes = 16 hexadecimal characters
+        if (hexData.size() != 16) {
+            continue;
+        }
+
+        std::array<std::uint8_t, 8> data{};
+        for (int i{0}; i < 8; ++i) {
+            data[i] = static_cast<std::uint8_t>(
+                std::stoul(hexData.substr(i * 2, 2), nullptr, 16)
+            );
+        }
+
+        // MeasuredAngle: 0|16@1- (0.1, 0)
+        const std::int16_t measuredRaw = readSigned16LittleEdian(data, 0);
+        
+        // CmdAngularRate: 16|16@1- (0.1, 0)
+        const std::int16_t cmdRaw = readSigned16LittleEdian(data, 2);
+
+        // Physical value = raw value * scale + offset
+        // In this problem, scale = 0.1 and offset = 0;
+        const double y_measured = measuredRaw * 0.1;
+        const double u_commanded = cmdRaw * 0.1;
+
+        if (!haveFirstKeptFrame) {
+            firstKeptTimestamp = timestamp;
+            haveFirstKeptFrame = true;
+        }
+
+        const double t = timestamp - firstKeptTimestamp;
+        rows.push_back(Row{t, u_commanded, y_measured});
+
+    }
     return rows;
 }
 
