@@ -1,12 +1,38 @@
 ### Part A - recover the data (CAN decode)
 
-Frame ID kept:
+Frame ID kept: 512 in decimal which is 0x200 in hexadecimal
 
-Signal 1 (u_commanded):  byte position / endianness / signed? / scale / offset:
-Signal 2 (y_measured):   byte position / endianness / signed? / scale / offset:
+Signal 1 (u_commanded): byte position / endianness / signed? / scale / offset
+- Byte position: Bytes 3-4 (zero-based 2-3).
+- Endianness: little endian
+- Signed: 16-bit signed integer
+- scale = 0.1 and offset = 0 
+
+
+Signal 2 (y_measured): byte position / endianness / signed? / scale / offset
+- Byte position: Bytes(1-2) (zero-based 0-1).
+- Endianness: little endian
+- Signed: 16-bit signed integer
+- scale = 0.1 and offset = 0  
 
 Notes (anything odd in the logs, how you checked the decode against the PNGs):
+- The candump log contains many CAN messages with different frame IDs, not only
+STEER_Actuator message. I then only kept frames with ID 512 in decimal (0x200 
+in hexadecimal), since different IDs have different data layouts. The kept frames
+with ID 0x200 will likely to appear every 5ms.
 
+- I tried to extract some of the bytes based extracting rule on gbc file. 
+Particularly, for deadband_test.log, u_commanded receives two bytes at 3-4 
+positions. Two values are 0x0014 and 0xFFEC after extraction and little-endian 
+modification. Then, combining with scales, we can calculate them with the scale 
+of 0.1. Based on the deadband_test log file, we can see they alternatively change 
+to another after 2s. That is exactly the trend that we see in the counterpart png 
+file. Similarly, y_measured starts at 0x00 for 1s and increases gradually to 
+0x001A for the next 1s. 
+
+- Similarly, I extract the bytes based on the rules at some specific timestamps 
+and reflects to the counterpart png file to check whether the value being extracted
+is correct or not.
 
 
 ### Part B - identify system
