@@ -18,17 +18,17 @@ Signal 2 (y_measured): byte position / endianness / signed? / scale / offset
 Notes (anything odd in the logs, how you checked the decode against the PNGs):
 - The candump log contains many CAN messages with different frame IDs, not only
 STEER_Actuator message. I then only kept frames with ID 512 in decimal (0x200 
-in hexadecimal), since different IDs have different data layouts. The kept frames
-with ID 0x200 will likely to appear every 5ms.
+in hexadecimal), since different IDs have different data layouts. The kept 
+frames with ID 0x200 will likely to appear every 5ms.
 
 - I tried to extract some of the bytes based extracting rule on gbc file. 
 Particularly, for deadband_test.log, u_commanded receives two bytes at 3-4 
 positions. Two values are 0x0014 and 0xFFEC after extraction and little-endian 
 modification. Then, combining with scales, we can calculate them with the scale 
-of 0.1. Based on the deadband_test log file, we can see they alternatively change 
-to another after 2s. That is exactly the trend that we see in the counterpart png 
-file. Similarly, y_measured starts at 0x00 for 1s and increases gradually to 
-0x001A for the next 1s. 
+of 0.1. Based on the deadband_test log file, we can see they alternatively 
+change to another after 2s. That is exactly the trend that we see in the 
+counterpart png file. Similarly, y_measured starts at 0x00 for 1s and increases 
+gradually to 0x001A for the next 1s. 
 
 - Similarly, I extract the bytes based on the rules at some specific timestamps 
 and reflects to the counterpart png file to check whether the value being extracted
@@ -36,6 +36,62 @@ is correct or not.
 
 
 ### Part B - identify system
+- Firstly, since the plant is a first-order system, we can model its velocity 
+using the differential equation 'tau * dv/dt + v = K * u', where tau is the time 
+constant and K is the plant gain. From the step_test plot, u_commanded is 
+initially held at 15.0 deg/s. After the transient response has settled, the 
+actual velocity becomes approximately constant, so dv/dt approx 0. Therefore, 
+the equation reduces to v = K * u. The actual steady-state velocity can be 
+estimated from the slope of y_measured. Since y_measured is an angle, v = dy/dt.
+From the plot, the measured angle increases by approximately 57 degrees over 
+3 seconds, so v ≈ 57 / 3 = 19 deg/s. Hence, K ≈ v / u ≈ 19 / 15 ≈ 1.27 ≈ 1.3.
+
+- Secondly, For the time constant, tau represents how quickly the actuator 
+approaches its new steady-state response after a sudden change in input.
+For a first-order system: v(t) = v0 * e^(-t / tau) when the commanded velocity 
+steps from 15 deg/s down to 0 deg/s. Before the step, the steady-state actual 
+velocity is approximately: v0 ≈ 19 deg/s. After one time constant, the velocity 
+should decay to approximately 36.8% of its initial value: v(tau) = 0.368 * v0. 
+Therefore, v(tau) ≈ 0.368 * 19 ≈ 7.0 deg/s. From the step_test data, the measured 
+velocity, estimated from the slope of y_measured, drops from approximately 19 deg/s 
+to around 7 deg/s in about 0.07 to 0.08 seconds. Therefore, the time constant can 
+be estimated as tau ≈ 0.075 s. This means the actuator responds relatively 
+quickly to changes in commanded velocity, with the actual velocity moving 
+significantly toward its new steady-state value within about 0.075 seconds.
+
+- From the deadband_test plot, the nonlinearity is more consistent with backlash 
+rather than a deadzone.
+
+- In the plot named Deadband test - small velocity sweep near centre, u_commanded 
+repeatedly switches between approximately +2 deg/s and -2 deg/s. At the beginning, 
+y_measured increases to around 2.6 degrees, showing that a command of magnitude 
+2 deg/s is capable of producing movement. However, after this initial movement, 
+y_measured becomes almost flat even though u_commanded continues switching 
+between positive and negative values.
+
+- This behaviour is not consistent with a simple deadzone. If -/+2 deg/s were 
+completely inside a deadzone, the actuator should not have moved significantly 
+at the beginning. Instead, the initial movement followed by a flat output during 
+repeated reversals suggests that the internal actuator motion is moving through 
+mechanical slack without immediately changing the measured output.
+
+- This shape is characteristic of backlash. When the command reverses direction, 
+the actuator must first move through the free-play region before the output 
+angle begins moving in the opposite direction. Therefore, the Deadband test - 
+small velocity sweep near centre plot provides evidence that the dominant 
+nonlinearity is backlash rather than a deadzone.
+
+- We estimate the backlash from the deadband_test using the motor-side travel 
+during the slack period. With u_commanded ≈ 2 deg/s and K ≈ 1.3, the motor velocity 
+is about v ≈ 1.3 * 2 = 2.6 deg/s. Since the output stays nearly unchanged for 
+about 1 second, the motor travels roughly 2.6 degrees through the slack. This is 
+approximately one side of the backlash gap, so the full backlash is about 
+BACKLASH ≈ 2 * 2.6 ≈ 5 degrees
+
+- We split it equally because the model assumes the slack is symmetric around 
+the output angle, giving about -/+2.6 degrees on each side.
+
+
 
 
 
