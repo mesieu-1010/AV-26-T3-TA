@@ -98,41 +98,39 @@ move in the same direction as the motor.
 
 ### Part C - control design choices
 
-### Part C - control design choices
-
 - I implemented a PID controller using:
 
-  u_commanded = kp * error + ki * integral + kd * derivative
+u_commanded = kp * error + ki * integral + kd * derivative
 
-  where:
+where:
 
-  error = target - measured
-  integral += error * dt
-  derivative = (error - previousError) / dt
+error = target - measured
+integral += error * dt
+derivative = (error - previousError) / dt
 
 - I tuned the PID gains manually in stages.
 
 - First, I set:
 
-  kp = 1.0
-  ki = 0.0
-  kd = 0.0
+kp = 1.0
+ki = 0.0
+kd = 0.0
 
 - I then increased kp gradually:
 
-  kp = 1.0
-  kp = 1.5
-  kp = 2.0
-  kp = 2.5
+kp = 1.0
+kp = 1.5
+kp = 2.0
+kp = 2.5
 
   while keeping ki and kd equal to zero.
 
 - The proportional gain mainly affects how strongly the controller reacts to the
-  current error. Increasing kp makes the commanded velocity larger when the
-  measured angle is far from the target, which reduces the rise time and makes the
-  system reach the target faster. However, if kp is too large, the controller can
-  become too aggressive and produce overshoot or oscillation. I therefore selected
-  kp = 2.0 as a balance between a fast response and stable behaviour.
+current error. Increasing kp makes the commanded velocity larger when the
+measured angle is far from the target, which reduces the rise time and makes the
+system reach the target faster. However, if kp is too large, the controller can
+become too aggressive and produce overshoot or oscillation. I therefore selected
+kp = 2.0 as a balance between a fast response and stable behaviour.
 
 - Next, I kept kp fixed and increased kd gradually:
 
@@ -141,31 +139,31 @@ move in the same direction as the motor.
   kd = 0.08
 
 - The derivative gain reacts to how quickly the error is changing. It provides
-  damping as the measured angle approaches the target. This helps reduce overshoot
-  and prevents the output from repeatedly oscillating around the target. Increasing
-  kd too much can make the response unnecessarily slow or sensitive to small
-  measurement changes, so I selected kd = 0.08 after comparing the settling
-  behaviour of the different trials.
+damping as the measured angle approaches the target. This helps reduce overshoot
+and prevents the output from repeatedly oscillating around the target. Increasing
+kd too much can make the response unnecessarily slow or sensitive to small
+measurement changes, so I selected kd = 0.08 after comparing the settling
+behaviour of the different trials.
 
 - Finally, I introduced the integral gain gradually:
 
-  ki = 0.02
-  ki = 0.05
-  ki = 0.10
-  ki = 0.15
+ki = 0.02
+ki = 0.05
+ki = 0.10
+ki = 0.15
 
 - The integral term accumulates error over time. Its main purpose is to remove
-  steady-state error that remains after the proportional and derivative terms have
-  settled. This is particularly useful for the small on-centre correction, where
-  backlash can cause the measured angle to remain slightly away from the target.
-  I selected ki = 0.15 because it provided enough integral action to reduce the
-  remaining steady-state error without causing significant overshoot or oscillation.
+steady-state error that remains after the proportional and derivative terms have
+settled. This is particularly useful for the small on-centre correction, where
+backlash can cause the measured angle to remain slightly away from the target.
+I selected ki = 0.15 because it provided enough integral action to reduce the
+remaining steady-state error without causing significant overshoot or oscillation.
 
 - The final PID gains used were:
 
-  kp = 2.0
-  ki = 0.15
-  kd = 0.08
+kp = 2.0
+ki = 0.15
+kd = 0.08
 
 - These gains were chosen to balance the main closed-loop performance measures:
 
@@ -191,14 +189,94 @@ move in the same direction as the motor.
   -20.0 <= integral <= 20.0
 
 - Without this limit, a large error over a long period could cause the integral
-  term to become very large. The stored integral could then continue pushing the
-  actuator even after it approaches the target, increasing overshoot and settling
-  time. Limiting the integral reduces this behaviour and helps the controller
-  settle more cleanly.
+term to become very large. The stored integral could then continue pushing the
+actuator even after it approaches the target, increasing overshoot and settling
+time. Limiting the integral reduces this behaviour and helps the controller
+settle more cleanly.
 
 - The final values were selected by repeatedly running Check 2 and comparing the
-  final error, overshoot, settling time, and controller response plots for the
-  large move, direction reversal, and small on-centre correction.
+final error, overshoot, settling time, and controller response plots for the
+large move, direction reversal, and small on-centre correction.
 
 
 ### Part D - reflection
+- For Part A, this was the first time I had read a DBC file to decode command 
+values. I spent Monday learning about DBC databases and how they are used to 
+decode CAN-log values. However, when I first looked at the CAN-log files, it was 
+quite confusing because there were many different frame IDs.
+
+- I then found that we only needed the STEER_Actuator messages, whose frame ID is 
+512 in decimal, which is 0x200 in hexadecimal. I extracted the relevant values 
+using the rules provided in the DBC database, including byte position, 
+endianness, scale, and offset, and then converted the raw values into the physical 
+y_measured and u_commanded values.
+
+- To check whether my decoding was correct, I selected several values from the 
+beginning of the logs and manually decoded them using the same rules. I then 
+compared the decoded values with the values shown in the corresponding PNG files.
+
+- After implementing the decoding in Question-A.cc, I plotted the extracted data 
+using the provided Python scripts and checked whether my plots aligned with the 
+sample PNG files.
+
+- For Part B, at first, I had no idea where to start until I asked ChatGPT about
+what a first-order system is. I then learned about first-order system dynamics
+and applied that concept to estimate the plant gain and time constant based on
+the step_test log.
+
+- When I first looked at deadband_test.log, I thought it represented a deadzone
+rather than backlash because the measured output stayed almost constant after
+about 2 seconds. This initially made me think that a command magnitude of
+2 deg/s was inside the deadzone.
+
+- However, with clarification from ChatGPT, I realised that if a command magnitude
+of 2 deg/s were actually inside the deadzone, the actuator should not have shown
+a steady increase during the first 2 seconds. Instead, the actuator initially
+moved, and from around 2.5 seconds onwards the internal actuator motion appeared
+to move through a slack region before the output changed direction.
+
+- I then looked at the reversal_test plot, which further strengthened my conclusion
+that the observed nonlinearity was more consistent with backlash behaviour than
+with a simple deadzone.
+
+- I then estimated the backlash value and split it equally on both sides of the
+actuator motion. Since I did not have enough evidence to determine whether the
+backlash was biased more heavily toward one direction, I assumed a symmetric
+backlash region and distributed the estimated gap evenly on both sides.
+
+- Finally, I ran check_test to validate the plant model against the provided data.
+The result satisfied the required condition of maxErr <= 1, which gave me
+confidence that the estimated plant parameters and backlash model were
+sufficiently close to the observed actuator behaviour.
+
+- For Part C, I first learned how to judge whether a controller response was good
+by looking at the four main step-response characteristics: rise time, overshoot,
+settling time, and steady-state error. These gave me clear criteria for tuning
+the controller rather than only checking the final angle.
+
+- I initially considered automatic tuning for kp, ki, and kd because it seemed
+faster. However, changing the gains while the controller was running made the
+behaviour less predictable, so I decided manual tuning was more suitable.
+
+- I started with proportional control and increased kp to reduce rise time. I then
+added kd to improve damping and reduce overshoot or oscillation, especially
+during direction reversal. Finally, I added a small ki to reduce steady-state
+error, particularly for the small on-centre correction.
+
+- I repeatedly ran Check 2 and compared the final error, overshoot, settling time,
+and response plots. This helped me understand the trade-off between making the
+controller faster and keeping it stable.
+
+- I also learned the purpose of anti-windup. Limiting the integral term prevents
+it from growing too large during sustained error, which helps reduce overshoot
+and long settling times.
+
+==> The technical assessment for the Redback Racing A-V department was very
+interesting to me because it gave me insight into how racing cars and C++
+programming skills can be combined in a practical scenario. It helped me strengthen 
+my C++ knowledge while also exposing me to some mechanical and mathematical 
+concepts that were necessary to solve the problem. This assessment made me realise 
+that programming skills alone are not enough. Domain knowledge is also important
+because understanding the physical system helps me design more appropriate logic, 
+choose better models, and write code that is more effective for the actual problem.
+
