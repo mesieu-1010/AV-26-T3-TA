@@ -40,17 +40,17 @@ is correct or not.
 using the differential equation 'tau * dv/dt + v = K * u', where tau is the time 
 constant and K is the plant gain. From the step_test plot, u_commanded is 
 initially held at 15.0 deg/s. After the transient response has settled, the 
-actual velocity becomes approximately constant, so dv/dt approx 0. Therefore, 
+actual velocity becomes approximately constant, so dv/dt is ≈ 0. Therefore, 
 the equation reduces to v = K * u. The actual steady-state velocity can be 
 estimated from the slope of y_measured. Since y_measured is an angle, v = dy/dt.
 From the plot, the measured angle increases by approximately 57 degrees over 
-3 seconds, so v ≈ 57 / 3 = 19 deg/s. Hence, K ≈ v / u ≈ 19 / 15 ≈ 1.27 ≈ 1.3.
+3 seconds, so v ≈ 57 / 3 ≈ 19 deg/s. Hence, K ≈ v / u ≈ 1.3.
 
 - Secondly, For the time constant, tau represents how quickly the actuator 
 approaches its new steady-state response after a sudden change in input.
-For a first-order system: v(t) = v0 * e^(-t / tau) when the commanded velocity 
+For a first-order system, v(t) = v0 * e^(-t / tau) when the commanded velocity 
 steps from 15 deg/s down to 0 deg/s. Before the step, the steady-state actual 
-velocity is approximately: v0 ≈ 19 deg/s. After one time constant, the velocity 
+velocity is approximately v0 = 19 deg/s. After one time constant, the velocity 
 should decay to approximately 36.8% of its initial value: v(tau) = 0.368 * v0. 
 Therefore, v(tau) ≈ 0.368 * 19 ≈ 7.0 deg/s. From the step_test data, the measured 
 velocity, estimated from the slope of y_measured, drops from approximately 19 deg/s 
@@ -69,11 +69,12 @@ y_measured increases to around 2.6 degrees, showing that a command of magnitude
 y_measured becomes almost flat even though u_commanded continues switching 
 between positive and negative values.
 
-- This behaviour is not consistent with a simple deadzone. If -/+2 deg/s were 
-completely inside a deadzone, the actuator should not have moved significantly 
-at the beginning. Instead, the initial movement followed by a flat output during 
-repeated reversals suggests that the internal actuator motion is moving through 
-mechanical slack without immediately changing the measured output.
+- This behaviour is not consistent with a simple deadzone. If the magnitude of 
+2 deg/s were completely inside a deadzone, the actuator should not have moved 
+significantly at the beginning. Instead, the initial movement followed by a 
+flat output during repeated reversals suggests that the internal actuator motion 
+is moving through mechanical slack without immediately changing the measured 
+output.
 
 - This shape is characteristic of backlash. When the command reverses direction, 
 the actuator must first move through the free-play region before the output 
@@ -82,21 +83,122 @@ small velocity sweep near centre plot provides evidence that the dominant
 nonlinearity is backlash rather than a deadzone.
 
 - We estimate the backlash from the deadband_test using the motor-side travel 
-during the slack period. With u_commanded ≈ 2 deg/s and K ≈ 1.3, the motor velocity 
-is about v ≈ 1.3 * 2 = 2.6 deg/s. Since the output stays nearly unchanged for 
-about 1 second, the motor travels roughly 2.6 degrees through the slack. This is 
-approximately one side of the backlash gap, so the full backlash is about 
+during the slack period. With u_commanded ≈ 2 deg/s and K ≈ 1.3, the motor 
+velocity is about v ≈ 1.3 * 2 ≈ 2.6 deg/s. Since the output stays nearly unchanged 
+for about 1 second, the motor travels roughly 2.6 degrees through the slack. 
+This is approximately one side of the backlash gap, so the full backlash is about 
 BACKLASH ≈ 2 * 2.6 ≈ 5 degrees
 
-- We split it equally because the model assumes the slack is symmetric around 
-the output angle, giving about -/+2.6 degrees on each side.
-
-
-
-
+- We split the backlash equally because the model assumes the slack is symmetric
+around the output angle, giving approximately 2.6 degrees on each side. These 
+values define the upper and lower slack boundaries. If the motor angle remains 
+within this slack region, the measured output angle stays constant. Once the 
+motor angle moves beyond either boundary, the measured output angle begins to 
+move in the same direction as the motor.
 
 ### Part C - control design choices
 
+### Part C - control design choices
+
+- I implemented a PID controller using:
+
+  u_commanded = kp * error + ki * integral + kd * derivative
+
+  where:
+
+  error = target - measured
+  integral += error * dt
+  derivative = (error - previousError) / dt
+
+- I tuned the PID gains manually in stages.
+
+- First, I set:
+
+  kp = 1.0
+  ki = 0.0
+  kd = 0.0
+
+- I then increased kp gradually:
+
+  kp = 1.0
+  kp = 1.5
+  kp = 2.0
+  kp = 2.5
+
+  while keeping ki and kd equal to zero.
+
+- The proportional gain mainly affects how strongly the controller reacts to the
+  current error. Increasing kp makes the commanded velocity larger when the
+  measured angle is far from the target, which reduces the rise time and makes the
+  system reach the target faster. However, if kp is too large, the controller can
+  become too aggressive and produce overshoot or oscillation. I therefore selected
+  kp = 2.0 as a balance between a fast response and stable behaviour.
+
+- Next, I kept kp fixed and increased kd gradually:
+
+  kd = 0.02
+  kd = 0.05
+  kd = 0.08
+
+- The derivative gain reacts to how quickly the error is changing. It provides
+  damping as the measured angle approaches the target. This helps reduce overshoot
+  and prevents the output from repeatedly oscillating around the target. Increasing
+  kd too much can make the response unnecessarily slow or sensitive to small
+  measurement changes, so I selected kd = 0.08 after comparing the settling
+  behaviour of the different trials.
+
+- Finally, I introduced the integral gain gradually:
+
+  ki = 0.02
+  ki = 0.05
+  ki = 0.10
+  ki = 0.15
+
+- The integral term accumulates error over time. Its main purpose is to remove
+  steady-state error that remains after the proportional and derivative terms have
+  settled. This is particularly useful for the small on-centre correction, where
+  backlash can cause the measured angle to remain slightly away from the target.
+  I selected ki = 0.15 because it provided enough integral action to reduce the
+  remaining steady-state error without causing significant overshoot or oscillation.
+
+- The final PID gains used were:
+
+  kp = 2.0
+  ki = 0.15
+  kd = 0.08
+
+- These gains were chosen to balance the main closed-loop performance measures:
+
+  - Rise time:
+    kp was increased to make the controller respond more strongly to large errors,
+    reducing the time required to approach the target.
+
+  - Overshoot:
+    kp was kept below the point where the response became too aggressive, and kd
+    was added to slow the approach to the target when the error was changing
+    quickly.
+
+  - Oscillation:
+    kd provides additional damping, while kp and ki were limited so that the
+    controller does not repeatedly cross above and below the target.
+
+  - Steady-state error:
+    ki accumulates persistent error and continues applying a correction until the
+    measured angle is close to the target.
+
+- I also implemented anti-windup by limiting the accumulated integral value to:
+
+  -20.0 <= integral <= 20.0
+
+- Without this limit, a large error over a long period could cause the integral
+  term to become very large. The stored integral could then continue pushing the
+  actuator even after it approaches the target, increasing overshoot and settling
+  time. Limiting the integral reduces this behaviour and helps the controller
+  settle more cleanly.
+
+- The final values were selected by repeatedly running Check 2 and comparing the
+  final error, overshoot, settling time, and controller response plots for the
+  large move, direction reversal, and small on-centre correction.
 
 
 ### Part D - reflection
