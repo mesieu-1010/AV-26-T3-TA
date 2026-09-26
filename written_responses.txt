@@ -8,7 +8,6 @@ Signal 1 (u_commanded): byte position / endianness / signed? / scale / offset
 - Signed: 16-bit signed integer
 - scale = 0.1 and offset = 0 
 
-
 Signal 2 (y_measured): byte position / endianness / signed? / scale / offset
 - Byte position: Bytes(1-2) (zero-based 0-1).
 - Endianness: little endian
@@ -98,106 +97,51 @@ move in the same direction as the motor.
 
 ### Part C - control design choices
 
+### Part C - control design choices
+
 - I implemented a PID controller using:
 
 u_commanded = kp * error + ki * integral + kd * derivative
 
 where:
+  error = target - measured
+  integral += error * dt
+  derivative = (error - previousError) / dt
 
-error = target - measured
-integral += error * dt
-derivative = (error - previousError) / dt
+- I tuned the PID gains manually in stages. I first set ki = 0 and kd = 0 and
+increased kp from 1.0 to 2.5. Increasing kp reduced the rise time and made the
+controller respond faster, but values that were too large risked overshoot and
+oscillation. I selected kp = 2.0 as a balance between speed and stability.
 
-- I tuned the PID gains manually in stages.
+- I then increased kd from 0.02 to 0.08 while keeping kp fixed. The derivative
+term provided damping, reduced overshoot, and helped prevent repeated
+oscillation around the target. I selected kd = 0.08 because it improved the
+settling behaviour without making the response too slow.
 
-- First, I set:
+- Finally, I increased ki from 0.02 to 0.15. The integral term was used to reduce
+persistent steady-state error, especially for the small on-centre correction.
+I selected ki = 0.15 because it reduced the remaining error without introducing
+significant overshoot or oscillation.
 
-kp = 1.0
-ki = 0.0
-kd = 0.0
-
-- I then increased kp gradually:
-
-kp = 1.0
-kp = 1.5
-kp = 2.0
-kp = 2.5
-
-  while keeping ki and kd equal to zero.
-
-- The proportional gain mainly affects how strongly the controller reacts to the
-current error. Increasing kp makes the commanded velocity larger when the
-measured angle is far from the target, which reduces the rise time and makes the
-system reach the target faster. However, if kp is too large, the controller can
-become too aggressive and produce overshoot or oscillation. I therefore selected
-kp = 2.0 as a balance between a fast response and stable behaviour.
-
-- Next, I kept kp fixed and increased kd gradually:
-
-  kd = 0.02
-  kd = 0.05
+- The final PID gains were:
+  kp = 2.0
+  ki = 0.15
   kd = 0.08
 
-- The derivative gain reacts to how quickly the error is changing. It provides
-damping as the measured angle approaches the target. This helps reduce overshoot
-and prevents the output from repeatedly oscillating around the target. Increasing
-kd too much can make the response unnecessarily slow or sensitive to small
-measurement changes, so I selected kd = 0.08 after comparing the settling
-behaviour of the different trials.
+- These values were chosen to balance the main closed-loop performance measures:
+kp improves rise time, kd reduces overshoot and oscillation, and ki reduces
+steady-state error.
 
-- Finally, I introduced the integral gain gradually:
+- I also implemented anti-windup by limiting the integral value to:
 
-ki = 0.02
-ki = 0.05
-ki = 0.10
-ki = 0.15
+-20.0 <= integral <= 20.0
 
-- The integral term accumulates error over time. Its main purpose is to remove
-steady-state error that remains after the proportional and derivative terms have
-settled. This is particularly useful for the small on-centre correction, where
-backlash can cause the measured angle to remain slightly away from the target.
-I selected ki = 0.15 because it provided enough integral action to reduce the
-remaining steady-state error without causing significant overshoot or oscillation.
+This prevents the integral term from becoming excessively large during sustained
+error, which could otherwise increase overshoot and settling time.
 
-- The final PID gains used were:
-
-kp = 2.0
-ki = 0.15
-kd = 0.08
-
-- These gains were chosen to balance the main closed-loop performance measures:
-
-  - Rise time:
-    kp was increased to make the controller respond more strongly to large errors,
-    reducing the time required to approach the target.
-
-  - Overshoot:
-    kp was kept below the point where the response became too aggressive, and kd
-    was added to slow the approach to the target when the error was changing
-    quickly.
-
-  - Oscillation:
-    kd provides additional damping, while kp and ki were limited so that the
-    controller does not repeatedly cross above and below the target.
-
-  - Steady-state error:
-    ki accumulates persistent error and continues applying a correction until the
-    measured angle is close to the target.
-
-- I also implemented anti-windup by limiting the accumulated integral value to:
-
-  -20.0 <= integral <= 20.0
-
-- Without this limit, a large error over a long period could cause the integral
-term to become very large. The stored integral could then continue pushing the
-actuator even after it approaches the target, increasing overshoot and settling
-time. Limiting the integral reduces this behaviour and helps the controller
-settle more cleanly.
-
-- The final values were selected by repeatedly running Check 2 and comparing the
-final error, overshoot, settling time, and controller response plots for the
-large move, direction reversal, and small on-centre correction.
-
+- I selected the final gains by repeatedly running Check 2 and comparing the final
+error, overshoot, settling time, and controller response plots for the large
+move, direction reversal, and small on-centre correction.
 
 ### Part D - reflection
 - For Part A, this was the first time I had read a DBC file to decode command 
@@ -270,6 +214,23 @@ controller faster and keeping it stable.
 - I also learned the purpose of anti-windup. Limiting the integral term prevents
 it from growing too large during sustained error, which helps reduce overshoot
 and long settling times.
+
+- I also tested the robustness of the controller by slightly changing the plant
+parameters away from my estimated values. For example, I tested with K = 1.2, 
+tau = 0.085, BACKLASH = 5.5. 
+
+- The controller remained stable with no overshoot or oscillation. The large
+move and reversal still reached their targets, although the settling times
+increased to approximately 3.81 s and 4.34 s respectively.
+
+- However, the small on-centre correction ended at 13.0 degrees for a target of
+13.5 degrees, producing a steady-state error of -0.5 degrees. This showed that
+small corrections are more sensitive to uncertainty in the plant model,
+particularly when the backlash is larger than estimated.
+
+- This robustness test helped confirm that the PID gains were stable for moderate
+changes in the plant, while also showing that the small-trim behaviour is the
+most sensitive part of the controller.
 
 ==> The technical assessment for the Redback Racing A-V department was very
 interesting to me because it gave me insight into how racing cars and C++
