@@ -12,9 +12,9 @@
 class Controller : public IController {
 private:
     // PID tuning parameters
-    double kp = 1.0;
-    double ki = 0.0;
-    double kd = 0.0;
+    double kp = 1.2;
+    double ki = 0.0015;
+    double kd = 0;
 
     // PID state
     double previousError = 0.0;
